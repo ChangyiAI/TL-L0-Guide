@@ -1,0 +1,23 @@
+{
+  "_说明": "待签包清单示例（`10` M15）。由导引技能生成，不手填；生成后不再改动，改动由指纹核对发现。属项目运行记录（D-205①），存 .tianlong/work/<任务编号>/packages/。",
+  "package_id": "qf-001-g1-01",
+  "doc_type": "规格确认书",
+  "task_id": "qf-001",
+  "step": "S1-SPD",
+  "created_at": "2026-10-03T20:58:11+08:00",
+  "created_by": "导引技能",
+  "files": [
+    {
+      "path": ".tianlong/work/qf-001/forms/02_规格确认书_v1.md",
+      "sha256": "（64 位十六进制）",
+      "role": "正文"
+    },
+    {
+      "path": ".specify/specs/qf-001/spec.md",
+      "sha256": "（64 位十六进制）",
+      "role": "附件"
+    }
+  ],
+  "manifest_sha256": "（对本清单去掉本字段与 fingerprint_code 后按固定格式计算）",
+  "fingerprint_code": "（manifest_sha256 前 8 位）"
+}
