@@ -101,12 +101,14 @@ class TestPackManifest(Seg1TestCase):
         self.assertIn(line, res.stdout.splitlines(), res.describe())
 
     def test_json_output_is_full_manifest(self):
-        """--json 时输出完整清单，与写入的清单文件内容相同"""
+        """--json 时输出完整清单：〔v0.4 裁定 R8 改〕另含 "ok": true，去掉 ok 后与写入的清单文件内容相同"""
         before = set(self.list_package_files())
         res = self.pack()
         self.assertExit(res, EXIT_OK)
         new = sorted(set(self.list_package_files()) - before)
-        self.assertEqual(json.loads(new[0].read_bytes().decode("utf-8")), self.parse_json(res))
+        out = self.parse_json(res)
+        self.assertIs(True, out.pop("ok", None), "〔裁定 R8〕--json 成功时应含 \"ok\": true")
+        self.assertEqual(json.loads(new[0].read_bytes().decode("utf-8")), out)
 
     def test_pack_does_not_touch_sign_dir(self):
         """pack 只写仓库内 .tianlong/work/，不碰签字目录"""

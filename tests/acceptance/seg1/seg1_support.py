@@ -447,3 +447,43 @@ class Seg1TestCase(unittest.TestCase):
     def modify(self, rel: str, extra: str = "签后追加的一行。\n"):
         p = self.path(rel)
         p.write_bytes(p.read_bytes() + extra.encode("utf-8"))
+
+    # ------------------------------------------------ 〔v0.4〕接口规格第 10 节回归用例的公共部件（只增不改）
+
+    def run_tl_env(self, *args, env=None, cwd=None):
+        """〔v0.4〕按指定环境变量运行 tl：先按 run_tl 的做法建默认环境（TL_SIGN_DIR 指向本用例的签字根目录、
+        TL_NOW 固定），再用 env 覆盖；env 中值为 None 的变量从环境中删去。
+        安全护栏：凡是 sign，TL_SIGN_DIR 必须非空，且（相对路径按运行目录解析后）落在本用例临时目录内，
+        绝不让测试碰到真实签字目录。其他子命令只读签字目录，不设此限。"""
+        run_cwd = Path(cwd) if cwd is not None else self.repo
+        full = {k: v for k, v in os.environ.items() if not k.startswith("TL_")}
+        full.update({"TL_SIGN_DIR": str(self.sign_root), "TL_NOW": FIXED_NOW,
+                     "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+        for key, value in (env or {}).items():
+            if value is None:
+                full.pop(key, None)
+            else:
+                full[key] = value
+        if args and args[0] == "sign":
+            sign_dir = full.get("TL_SIGN_DIR", "")
+            self.assertTrue(sign_dir, "测试护栏：sign 必须带非空的 TL_SIGN_DIR")
+            p = Path(sign_dir)
+            p = p if p.is_absolute() else run_cwd / p
+            self.assertTrue(str(p.resolve()).startswith(str(self.tmp)),
+                            f"测试护栏：签字目录不在临时目录内，拒绝运行：{sign_dir}")
+        proc = subprocess.run(
+            [sys.executable, str(TL_PATH), *args],
+            cwd=str(run_cwd), env=full,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+        )
+        return TlResult(
+            list(args), proc.returncode,
+            proc.stdout.decode("utf-8", errors="replace"),
+            proc.stderr.decode("utf-8", errors="replace"),
+        )
+
+    def forged_record_v4(self, package_id, fingerprint_code, manifest_sha256, decision="已确认"):
+        """〔v0.4 裁定 R3〕格式完整的签字记录（含 manifest_sha256），用于伪造、重复签字等用例。"""
+        rec = self.forged_record(package_id, fingerprint_code, decision)
+        rec["manifest_sha256"] = manifest_sha256
+        return rec

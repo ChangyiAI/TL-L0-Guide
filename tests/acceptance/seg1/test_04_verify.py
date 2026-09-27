@@ -62,15 +62,15 @@ class TestVerifyForgery(VerifyBase):
     """伪造签字判无效（门1 确认单实测③"伪造签字"）。"""
 
     def test_forged_wrong_fingerprint(self):
-        """在别处写一条格式正确、链条正确、指纹码不符的签字 → 4"""
-        self.append_sig_record(self.forged_record(self.pid, "deadbeef"))
-        self.assertExit(self.verify(), EXIT_UNSIGNED)
+        """在别处写一条格式正确、链条正确、指纹码不符的签字 → 〔v0.4 裁定 R3 改〕3（原为 4）"""
+        self.append_sig_record(self.forged_record_v4(self.pid, "deadbeef", "deadbeef" + "0" * 56))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
 
     def test_forged_after_other_signatures(self):
-        """已有合法签字的记录末尾追加一条指纹不符的伪造签字 → 4"""
+        """已有合法签字的记录末尾追加一条指纹不符的伪造签字 → 〔v0.4 裁定 R3 改〕3（原为 4）"""
         self.sign_ok(self.pack_ok()[0], "确认")
-        self.append_sig_record(self.forged_record(self.pid, "0badf00d"))
-        self.assertExit(self.verify(), EXIT_UNSIGNED)
+        self.append_sig_record(self.forged_record_v4(self.pid, "0badf00d", "0badf00d" + "0" * 56))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
 
     def test_forged_broken_chain(self):
         """伪造一条指纹码正确、但链条不对的签字 → 5"""
@@ -81,7 +81,7 @@ class TestVerifyForgery(VerifyBase):
         self.assertExit(self.verify(), EXIT_CORRUPT)
 
     def test_manifest_rebuilt_after_signing(self):
-        """签后改附件并按规格重做清单（文件指纹、清单指纹都自洽）→ 签字里的指纹码对不上 → 4"""
+        """签后改附件并按规格重做清单（文件指纹、清单指纹都自洽）→ 签字里的完整指纹对不上 → 〔v0.4 裁定 R3 改〕3（原为 4）"""
         self.sign_ok(self.pid, "确认")
         self.modify(ATTACH_REL)
         m = json.loads(self.manifest_path.read_bytes().decode("utf-8"))
@@ -90,7 +90,7 @@ class TestVerifyForgery(VerifyBase):
         m = seal_manifest(m)
         self.assertNotEqual(self.m["fingerprint_code"], m["fingerprint_code"])
         self.manifest_path.write_bytes((json.dumps(m, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
-        self.assertExit(self.verify(), EXIT_UNSIGNED)
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
 
     def test_duplicate_signature(self):
         """同一个包出现两条签字（链条正确）→ 5"""
@@ -201,10 +201,10 @@ class TestVerifyOrder(VerifyBase):
         self.assertExit(self.verify(), EXIT_UNSIGNED)
 
     def test_forged_and_changed(self):
-        """伪造指纹码 ＋ 文件被改 → 4（第四项先于第五项）"""
-        self.append_sig_record(self.forged_record(self.pid, "deadbeef"))
+        """伪造指纹 ＋ 文件被改 → 〔v0.4 裁定 R3 改〕3（原为 4：完整指纹不符与文件被改都判 3）"""
+        self.append_sig_record(self.forged_record_v4(self.pid, "deadbeef", "deadbeef" + "0" * 56))
         self.modify(MAIN_REL)
-        self.assertExit(self.verify(), EXIT_UNSIGNED)
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
 
     def test_duplicate_and_changed(self):
         """重复签字 ＋ 文件被改 → 5（第二项先于第五项）"""
@@ -320,9 +320,10 @@ class TestVerifyManifestRecompute(VerifyBase):
         self.assertExit(self.verify(), EXIT_FINGERPRINT)
 
     def test_duplicate_and_manifest_edited(self):
-        """重复签字 ＋ 清单被改 → 3（重算清单指纹先于签字条数）"""
+        """重复签字 ＋ 清单被改 → 3（重算清单指纹先于签字条数）
+        〔v0.4 裁定 R3 改〕追加的重复签字补上 manifest_sha256（原记录缺此字段，按 R3 会先判 5）；期望不变"""
         self.sign_ok(self.pid, "确认")
-        self.append_sig_record(self.forged_record(self.pid, self.m["fingerprint_code"]))
+        self.append_sig_record(self.forged_record_v4(self.pid, self.m["fingerprint_code"], self.m["manifest_sha256"]))
         self.edit_manifest(lambda m: m.update(summary="改过"))
         self.assertExit(self.verify(), EXIT_FINGERPRINT)
 
