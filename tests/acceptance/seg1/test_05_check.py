@@ -3,6 +3,7 @@
 
 通过为 0；有问题为 2。
 """
+import shutil
 import unittest
 
 from seg1_support import (
@@ -202,6 +203,100 @@ class TestCheckHandover(CheckBase):
         """非交接卡的文书（如空白的过程审批单）不按交接卡六栏核对 → 0"""
         self.write_file(".tianlong/work/qf-001/forms/06_过程审批单_004.md",
                         "# 过程审批单\n\n| 项 | 填写 |\n| :-- | :-- |\n| 涉及文件 | |\n")
+        self.assertExit(self.check(), EXIT_OK)
+
+
+class TestCheckAssumptionsRequired(CheckBase):
+    """〔裁定 Q18〕假设日志必填：id、step、decision、reason、cost、recorded_by、recorded_at；
+    task_item、files、s6_route 选填。cost 的缺省见 open_questions.md 新问题 N1，此处不测缺 cost。"""
+
+    def test_missing_required_field(self):
+        """缺任一必填字段（cost 除外）→ 2"""
+        for field in ("id", "step", "decision", "reason", "recorded_by", "recorded_at"):
+            with self.subTest(field=field):
+                item = self.valid_assumption(1)
+                del item[field]
+                self.write_assumptions("qf-001", [self.valid_assumption(2), item])
+                self.assertExit(self.check(), EXIT_FIELD)
+
+    def test_optional_fields_may_be_absent(self):
+        """对照组：缺选填字段 task_item、files、s6_route（逐个缺、三个都缺）→ 0"""
+        for fields in (("task_item",), ("files",), ("s6_route",), ("task_item", "files", "s6_route")):
+            with self.subTest(fields=fields):
+                item = self.valid_assumption(1)
+                for f in fields:
+                    del item[f]
+                self.write_assumptions("qf-001", [item])
+                self.assertExit(self.check(), EXIT_OK)
+
+
+class TestCheckProgressFormat(CheckBase):
+    """〔裁定 Q23〕进度卡嵌套字段按 4.1 核对：baseline_commit 为 7～40 位小写十六进制；
+    current_step 为 S＋一位数字＋连字符＋大写字母；token_holder 须含 role 与 since；task_id 须与目录名一致。"""
+
+    def _check_with(self, change):
+        data = self.valid_progress()
+        change(data)
+        self.write_progress("qf-001", data)
+        return self.check()
+
+    def test_baseline_commit(self):
+        """baseline_commit：7 位、40 位小写十六进制通过；大写、6 位、41 位、非十六进制、空串 → 2"""
+        cases = (("a1b2c3d", EXIT_OK), ("0123456789abcdef0123456789abcdef01234567", EXIT_OK),
+                 ("A1B2C3D", EXIT_FIELD), ("a1b2c3", EXIT_FIELD),
+                 ("0123456789abcdef0123456789abcdef012345678", EXIT_FIELD),
+                 ("g1b2c3d", EXIT_FIELD), ("", EXIT_FIELD))
+        for value, expected in cases:
+            with self.subTest(baseline_commit=value):
+                self.assertExit(self._check_with(lambda d: d.update(baseline_commit=value)), expected)
+
+    def test_current_step(self):
+        """current_step：S0-INI、S3-DEV 通过；小写、缺连字符、两位数字、缺字母、下划线 → 2"""
+        cases = (("S0-INI", EXIT_OK), ("S3-DEV", EXIT_OK),
+                 ("s1-spd", EXIT_FIELD), ("S1-spd", EXIT_FIELD), ("S1SPD", EXIT_FIELD),
+                 ("S12-SPD", EXIT_FIELD), ("S1-", EXIT_FIELD), ("S1_SPD", EXIT_FIELD), ("", EXIT_FIELD))
+        for value, expected in cases:
+            with self.subTest(current_step=value):
+                self.assertExit(self._check_with(lambda d: d.update(current_step=value)), expected)
+
+    def test_token_holder_role_and_since(self):
+        """token_holder 缺 role 或缺 since → 2"""
+        for key in ("role", "since"):
+            with self.subTest(missing=key):
+                self.assertExit(self._check_with(lambda d: d["token_holder"].pop(key)), EXIT_FIELD)
+
+    def test_task_id_matches_directory(self):
+        """task_id 格式合法、但与所在目录名不一致（qf-001 目录里写 qf-002）→ 2"""
+        self.assertExit(self._check_with(lambda d: d.update(task_id="qf-002")), EXIT_FIELD)
+
+
+class TestCheckMissingRecords(CheckBase):
+    """〔裁定 Q23〕任务目录下还没有 assumptions.jsonl 或 forms/ 时视为合法。"""
+
+    def _progress_without_form_refs(self):
+        # 去掉指向 forms/ 的引用，避免"引用的文件不存在"混入判定
+        data = self.valid_progress()
+        data["conditions"][0]["readiness"] = "就绪"
+        del data["conditions"][0]["exception_ref"]
+        del data["steps"][0]["handover"]
+        self.write_progress("qf-001", data)
+
+    def test_no_assumptions_file(self):
+        """没有 assumptions.jsonl → 0"""
+        (self.work_dir("qf-001") / "assumptions.jsonl").unlink()
+        self.assertExit(self.check(), EXIT_OK)
+
+    def test_no_forms_dir(self):
+        """没有 forms/ 目录 → 0"""
+        self._progress_without_form_refs()
+        shutil.rmtree(self.work_dir("qf-001") / "forms")
+        self.assertExit(self.check(), EXIT_OK)
+
+    def test_neither(self):
+        """两者都没有 → 0"""
+        self._progress_without_form_refs()
+        (self.work_dir("qf-001") / "assumptions.jsonl").unlink()
+        shutil.rmtree(self.work_dir("qf-001") / "forms")
         self.assertExit(self.check(), EXIT_OK)
 
 

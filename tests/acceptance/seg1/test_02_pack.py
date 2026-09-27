@@ -164,5 +164,28 @@ class TestPackRejects(Seg1TestCase):
                 self._assert_rejected(self.run_tl(*args))
 
 
+class TestPackPreconditions(Seg1TestCase):
+    """〔裁定 Q24〕pack 要求该任务的进度卡已存在、--step 符合 4.1 的步骤代号格式，否则 1，且不写清单。"""
+
+    def setUp(self):
+        super().setUp()
+        self.setup_task()
+
+    def test_progress_missing(self):
+        """任务目录下没有 progress.json → 1"""
+        (self.work_dir("qf-001") / "progress.json").unlink()
+        res = self.pack()
+        self.assertExit(res, EXIT_USAGE)
+        self.assertEqual([], self.list_package_files())
+
+    def test_invalid_step_code(self):
+        """--step 不是"S＋一位数字＋连字符＋大写字母" → 1"""
+        for step in ("s1-spd", "S1-spd", "S1SPD", "S1", "SPD", "S12-SPD", "S1_SPD", "S1-", ""):
+            with self.subTest(step=step):
+                res = self.pack(step=step)
+                self.assertExit(res, EXIT_USAGE)
+                self.assertEqual([], self.list_package_files())
+
+
 if __name__ == "__main__":
     unittest.main()

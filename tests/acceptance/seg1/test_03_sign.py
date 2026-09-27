@@ -300,6 +300,18 @@ class TestSignUsage(SignBase):
         """缺少决定参数 → 1"""
         self.assertRefused(self.run_tl("sign", self.pid, "--json"), EXIT_USAGE, None)
 
+    def test_package_not_exist(self):
+        """〔裁定 Q21〕包编号格式合法、但包不存在 → 1，不写入"""
+        for pid in ("qf-001-g1-99", "qf-001-g0-01", "qf-002-g1-01"):
+            with self.subTest(package_id=pid):
+                self.assertRefused(self.sign(pid, "确认"), EXIT_USAGE, None)
+
+    def test_package_id_invalid_format(self):
+        """〔裁定 Q21〕包编号格式不合法 → 1，不写入"""
+        for pid in ("QF-001-g1-01", "qf-001-zz-01", "qf-001-g1-1", "qf-001", "bogus"):
+            with self.subTest(package_id=pid):
+                self.assertRefused(self.sign(pid, "确认"), EXIT_USAGE, None)
+
 
 if __name__ == "__main__":
     unittest.main()

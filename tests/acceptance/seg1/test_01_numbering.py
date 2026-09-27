@@ -116,9 +116,9 @@ class TestCheckNumbering(Seg1TestCase):
             "files": files,
         })
 
-    def _write_manifest(self, package_id):
+    def _write_manifest(self, package_id, filename=None):
         m = self._hand_manifest(package_id)
-        self.write_file(f".tianlong/work/qf-001/packages/{package_id}.json",
+        self.write_file(f".tianlong/work/qf-001/packages/{filename or package_id}.json",
                         json.dumps(m, ensure_ascii=False, indent=2) + "\n")
 
     def test_valid_package_id_passes(self):
@@ -146,6 +146,25 @@ class TestCheckNumbering(Seg1TestCase):
                 data["task_id"] = bad
                 self.write_progress("qf-001", data)
                 self.assertExit(self.run_tl("check", "--task", "qf-001", "--json"), EXIT_FIELD)
+
+
+class TestCheckNumberingRuled(Seg1TestCase):
+    """〔裁定 Q22〕包编号中的任务部分须与所在任务一致；清单文件名须与 package_id 一致。"""
+
+    _hand_manifest = TestCheckNumbering._hand_manifest
+    _write_manifest = TestCheckNumbering._write_manifest
+
+    def test_package_of_other_task(self):
+        """qf-001 的 packages/ 下出现格式合法的 qf-002-g1-01 → 2"""
+        self.setup_task()
+        self._write_manifest("qf-002-g1-01")
+        self.assertExit(self.run_tl("check", "--task", "qf-001", "--json"), EXIT_FIELD)
+
+    def test_filename_differs_from_package_id(self):
+        """清单文件名 qf-001-g1-01.json，内容里的 package_id 却是 qf-001-g1-02 → 2"""
+        self.setup_task()
+        self._write_manifest("qf-001-g1-02", filename="qf-001-g1-01")
+        self.assertExit(self.run_tl("check", "--task", "qf-001", "--json"), EXIT_FIELD)
 
 
 if __name__ == "__main__":

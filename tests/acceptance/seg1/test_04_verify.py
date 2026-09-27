@@ -8,7 +8,7 @@ import json
 import unittest
 
 from seg1_support import (
-    ATTACH_REL, EXIT_CORRUPT, EXIT_FINGERPRINT, EXIT_OK, EXIT_UNSIGNED, MAIN_REL,
+    ATTACH_REL, EXIT_CORRUPT, EXIT_FINGERPRINT, EXIT_OK, EXIT_UNSIGNED, EXIT_USAGE, MAIN_REL,
     Seg1TestCase, seal_manifest, sha256_hex,
 )
 
@@ -215,7 +215,7 @@ class TestVerifyOrder(VerifyBase):
 
 
 class TestVerifyTask(VerifyBase):
-    """verify --task：任一个包不通过即取最严重的退出码（待定 Q9：按数值取最大）。"""
+    """verify --task：任一个包不通过即取最严重的退出码（裁定 Q9：严重程度 5 ＞ 3 ＞ 4）。"""
 
     def setUp(self):
         super().setUp()
@@ -254,10 +254,10 @@ class TestVerifyTask(VerifyBase):
         self.assertExit(self.verify_task(), EXIT_CORRUPT)
 
     def test_mixed_changed_and_unsigned(self):
-        """一个签后改件（3）、一个未签（4）→ 4（待定 Q9）"""
+        """〔裁定 Q9〕一个签后改件（3）、一个未签（4）→ 3（严重程度 5 ＞ 3 ＞ 4）"""
         self.sign_ok(self.pid, "确认")
         self.modify(MAIN_REL)
-        self.assertExit(self.verify_task(), EXIT_UNSIGNED)
+        self.assertExit(self.verify_task(), EXIT_FINGERPRINT)
 
     def test_other_task_not_counted(self):
         """别的任务的包不影响本任务的核对结果"""
@@ -268,6 +268,96 @@ class TestVerifyTask(VerifyBase):
         self.sign_ok(self.pid2, "确认")
         self.assertExit(self.verify_task("qf-001"), EXIT_OK)
         self.assertExit(self.verify_task("qf-002"), EXIT_UNSIGNED)
+
+
+class TestVerifyManifestRecompute(VerifyBase):
+    """〔裁定 Q20〕verify 重新计算清单指纹，与清单里的 manifest_sha256 不一致 → 3。
+    核对顺序：链条（5）→ 重算清单指纹（3）→ 签字条数（4／5）→ 决定 → 指纹码 → 文件。"""
+
+    def edit_manifest(self, change):
+        """改清单内容，但不动 manifest_sha256、fingerprint_code 两个字段，也不动受审文件。"""
+        m = json.loads(self.manifest_path.read_bytes().decode("utf-8"))
+        change(m)
+        self.manifest_path.write_bytes((json.dumps(m, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+
+    def test_summary_edited_after_sign(self):
+        """签后只改清单的 summary → 3"""
+        self.sign_ok(self.pid, "确认")
+        self.edit_manifest(lambda m: m.update(summary="签后偷偷改的摘要"))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_step_edited_after_sign(self):
+        """签后只改清单的 step → 3"""
+        self.sign_ok(self.pid, "确认")
+        self.edit_manifest(lambda m: m.update(step="S4-REL"))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_roles_swapped_after_sign(self):
+        """签后对调正文与附件的角色 → 3"""
+        self.sign_ok(self.pid, "确认")
+
+        def swap(m):
+            for f in m["files"]:
+                f["role"] = "附件" if f["role"] == "正文" else "正文"
+        self.edit_manifest(swap)
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_file_entry_removed_after_sign(self):
+        """签后从清单里删掉附件这一项（剩下的文件都未改）→ 3"""
+        self.sign_ok(self.pid, "确认")
+        self.edit_manifest(lambda m: m.update(files=[f for f in m["files"] if f["role"] == "正文"]))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_unsigned_and_manifest_edited(self):
+        """未签 ＋ 清单被改 → 3（重算清单指纹先于签字条数）"""
+        self.edit_manifest(lambda m: m.update(summary="改过"))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_rejected_and_manifest_edited(self):
+        """已退回 ＋ 清单被改 → 3（重算清单指纹先于决定核对）"""
+        self.sign_ok(self.pid, "退回", reason="重做")
+        self.edit_manifest(lambda m: m.update(summary="改过"))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_duplicate_and_manifest_edited(self):
+        """重复签字 ＋ 清单被改 → 3（重算清单指纹先于签字条数）"""
+        self.sign_ok(self.pid, "确认")
+        self.append_sig_record(self.forged_record(self.pid, self.m["fingerprint_code"]))
+        self.edit_manifest(lambda m: m.update(summary="改过"))
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_chain_broken_and_manifest_edited(self):
+        """链条坏 ＋ 清单被改 → 5（链条先于重算清单指纹）"""
+        self.sign_ok(self.pid, "确认")
+        self.sign_ok(self.pack_ok()[0], "确认")
+        self.tamper_sig_line(0)
+        self.edit_manifest(lambda m: m.update(summary="改过"))
+        self.assertExit(self.verify(), EXIT_CORRUPT)
+
+    def test_task_with_edited_manifest(self):
+        """按任务核对：另一个包已确认且未变，本包签后清单被改 → 3"""
+        other = self.pack_ok(doc="g0", step="S0-INI")[0]
+        self.sign_ok(other, "确认")
+        self.sign_ok(self.pid, "确认")
+        self.edit_manifest(lambda m: m.update(summary="改过"))
+        self.assertExit(self.verify_task(), EXIT_FINGERPRINT)
+
+
+class TestVerifyBadPackageId(VerifyBase):
+    """〔裁定 Q21〕verify 的包编号格式不合法或包不存在 → 1。"""
+
+    def test_package_not_exist(self):
+        """包编号格式合法、但包不存在 → 1"""
+        self.sign_ok(self.pid, "确认")
+        for pid in ("qf-001-g1-99", "qf-002-g1-01"):
+            with self.subTest(package_id=pid):
+                self.assertExit(self.verify(pid), EXIT_USAGE)
+
+    def test_package_id_invalid_format(self):
+        """包编号格式不合法 → 1"""
+        for pid in ("QF-001-g1-01", "qf-001-zz-01", "qf-001-g1-1", "bogus"):
+            with self.subTest(package_id=pid):
+                self.assertExit(self.verify(pid), EXIT_USAGE)
 
 
 if __name__ == "__main__":
