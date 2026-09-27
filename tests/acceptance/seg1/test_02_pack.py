@@ -4,7 +4,7 @@ import json
 import unittest
 
 from seg1_support import (
-    ATTACH_REL, EXIT_OK, EXIT_USAGE, FIXED_NOW, HEX64_RE, MAIN_REL, MANIFEST_FIELDS,
+    ATTACH_REL, EXIT_FIELD, EXIT_OK, EXIT_USAGE, FIXED_NOW, HEX64_RE, MAIN_REL, MANIFEST_FIELDS,
     Seg1TestCase, sha256_hex, spec_manifest_sha256,
 )
 
@@ -184,6 +184,51 @@ class TestPackPreconditions(Seg1TestCase):
             with self.subTest(step=step):
                 res = self.pack(step=step)
                 self.assertExit(res, EXIT_USAGE)
+                self.assertEqual([], self.list_package_files())
+
+
+class TestPackRuledV3(Seg1TestCase):
+    """接口规格 v0.3 第 9 节裁定补的 pack 用例。"""
+
+    def setUp(self):
+        super().setUp()
+        self.setup_task()
+
+    def test_step_digit_range(self):
+        """〔裁定 N3〕--step 的数字只取 0～7：S7-OPS 成功；S8-OPS、S9-OPS → 1，不写清单"""
+        self.assertEqual("S7-OPS", self.pack_ok(step="S7-OPS")[2]["step"])
+        for p in self.list_package_files():
+            p.unlink()
+        for step in ("S8-OPS", "S9-OPS"):
+            with self.subTest(step=step):
+                self.assertExit(self.pack(step=step), EXIT_USAGE)
+                self.assertEqual([], self.list_package_files())
+
+    def test_created_by_default_tl(self):
+        """〔裁定 N4／Q5〕created_by 缺省为 tl"""
+        self.assertEqual("tl", self.pack_ok()[2]["created_by"])
+
+    def test_file_in_other_task_packages_dir(self):
+        """〔裁定 N4／Q6〕文件指向别的任务的 packages/ 目录 → 1，不写清单"""
+        self.write_file(".tianlong/work/qf-002/packages/notes.md", "x\n")
+        res = self.pack(attach=(".tianlong/work/qf-002/packages/notes.md",))
+        self.assertExit(res, EXIT_USAGE)
+        self.assertEqual([], self.list_package_files())
+
+    def test_invalid_progress_card(self):
+        """〔裁定 N5〕进度卡存在但不合法（通道取值错、缺必填字段、不是 JSON）→ 2，不写清单"""
+        bad = {}
+        d = self.valid_progress()
+        d["channel"] = "CH-HOTFIX"
+        bad["通道取值错"] = d
+        d = self.valid_progress()
+        del d["token_holder"]
+        bad["缺 token_holder"] = d
+        bad["不是 JSON"] = "{not json"
+        for name, data in bad.items():
+            with self.subTest(case=name):
+                self.write_progress("qf-001", data)
+                self.assertExit(self.pack(), EXIT_FIELD)
                 self.assertEqual([], self.list_package_files())
 
 

@@ -118,11 +118,11 @@ class TestCheckAssumptions(CheckBase):
                 self.assertExit(self.check(), expected)
 
     def test_cost_default(self):
-        """不写 cost（缺省为中）→ 0"""
+        """〔裁定 N1〕不写 cost → 2（cost 必须显式写出；"默认取中"是判定时的默认，不是可以不写）"""
         item = self.valid_assumption(1)
         del item["cost"]
         self.write_assumptions("qf-001", [item])
-        self.assertExit(self.check(), EXIT_OK)
+        self.assertExit(self.check(), EXIT_FIELD)
 
     def test_low_with_fixed_reason(self):
         """定"低"并附四个固定理由之一 → 0"""
@@ -298,6 +298,19 @@ class TestCheckMissingRecords(CheckBase):
         (self.work_dir("qf-001") / "assumptions.jsonl").unlink()
         shutil.rmtree(self.work_dir("qf-001") / "forms")
         self.assertExit(self.check(), EXIT_OK)
+
+
+class TestCheckStepDigitRange(CheckBase):
+    """〔裁定 N3〕步骤代号的数字只取 0～7。"""
+
+    def test_current_step_digit_range(self):
+        """current_step：S7-OPS 通过；S8-OPS、S9-OPS → 2"""
+        for value, expected in (("S7-OPS", EXIT_OK), ("S8-OPS", EXIT_FIELD), ("S9-OPS", EXIT_FIELD)):
+            with self.subTest(current_step=value):
+                data = self.valid_progress()
+                data["current_step"] = value
+                self.write_progress("qf-001", data)
+                self.assertExit(self.check(), expected)
 
 
 if __name__ == "__main__":

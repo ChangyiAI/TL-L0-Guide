@@ -9,7 +9,7 @@ import unittest
 
 from seg1_support import (
     ATTACH_REL, EXIT_CORRUPT, EXIT_FINGERPRINT, EXIT_OK, EXIT_UNSIGNED, EXIT_USAGE, MAIN_REL,
-    Seg1TestCase, seal_manifest, sha256_hex,
+    Seg1TestCase, seal_manifest, sha256_hex, spec_manifest_sha256,
 )
 
 
@@ -356,6 +356,41 @@ class TestVerifyBadPackageId(VerifyBase):
     def test_package_id_invalid_format(self):
         """包编号格式不合法 → 1"""
         for pid in ("QF-001-g1-01", "qf-001-zz-01", "qf-001-g1-1", "bogus"):
+            with self.subTest(package_id=pid):
+                self.assertExit(self.verify(pid), EXIT_USAGE)
+
+
+class TestVerifyRuledV3(VerifyBase):
+    """接口规格 v0.3 第 9 节裁定补的 verify 用例。"""
+
+    def _rewrite_manifest(self, change, reseal_sha=True):
+        m = json.loads(self.manifest_path.read_bytes().decode("utf-8"))
+        change(m)
+        if reseal_sha:
+            m["manifest_sha256"] = spec_manifest_sha256(m)
+        self.manifest_path.write_bytes((json.dumps(m, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+        return m
+
+    def test_stale_fingerprint_code_after_sign(self):
+        """〔裁定 N2〕签后删掉附件项，写回新的 manifest_sha256、fingerprint_code 仍是旧值 → 3"""
+        self.sign_ok(self.pid, "确认")
+        m = self._rewrite_manifest(lambda m: m.update(files=[f for f in m["files"] if f["role"] == "正文"]))
+        self.assertEqual(self.m["fingerprint_code"], m["fingerprint_code"])
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_fingerprint_code_altered_only(self):
+        """〔裁定 N2〕签后只改 fingerprint_code → 3（清单自洽核对先于签字指纹码核对，所以不是 4）"""
+        self.sign_ok(self.pid, "确认")
+        self._rewrite_manifest(lambda m: m.update(fingerprint_code="deadbeef"), reseal_sha=False)
+        self.assertExit(self.verify(), EXIT_FINGERPRINT)
+
+    def test_bad_package_before_chain(self):
+        """〔裁定 N7〕签字记录链条已坏时，核对不存在或格式不合法的包编号 → 1（先于一切核对）"""
+        self.sign_ok(self.pid, "确认")
+        self.sign_ok(self.pack_ok()[0], "确认")
+        self.tamper_sig_line(0)
+        self.assertExit(self.verify(self.pid), EXIT_CORRUPT)  # 对照：存在的包 → 5
+        for pid in ("qf-001-g1-99", "QF-001-g1-01", "bogus"):
             with self.subTest(package_id=pid):
                 self.assertExit(self.verify(pid), EXIT_USAGE)
 

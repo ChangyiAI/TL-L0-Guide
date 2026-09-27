@@ -9,7 +9,7 @@ import unittest
 
 from seg1_support import (
     ATTACH_REL, EXIT_CORRUPT, EXIT_FINGERPRINT, EXIT_OK, EXIT_USAGE, FIXED_NOW, MAIN_REL,
-    REPO_NAME, SIGNATURE_FIELDS, ZERO64, Seg1TestCase, sha256_hex,
+    REPO_NAME, SIGNATURE_FIELDS, ZERO64, Seg1TestCase, sha256_hex, spec_manifest_sha256,
 )
 
 
@@ -311,6 +311,44 @@ class TestSignUsage(SignBase):
         for pid in ("QF-001-g1-01", "qf-001-zz-01", "qf-001-g1-1", "qf-001", "bogus"):
             with self.subTest(package_id=pid):
                 self.assertRefused(self.sign(pid, "确认"), EXIT_USAGE, None)
+
+
+class TestSignRuledV3(SignBase):
+    """接口规格 v0.3 第 9 节裁定补的 sign 用例。"""
+
+    def _rewrite_manifest(self, change, reseal_sha=True):
+        """改清单内容；reseal_sha=True 时按规格重算并写回 manifest_sha256，fingerprint_code 一律保持原值。"""
+        m = json.loads(self.manifest_path.read_bytes().decode("utf-8"))
+        change(m)
+        if reseal_sha:
+            m["manifest_sha256"] = spec_manifest_sha256(m)
+        self.manifest_path.write_bytes((json.dumps(m, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+        return m
+
+    def test_stale_fingerprint_code(self):
+        """〔裁定 N2〕改清单后写回新的 manifest_sha256、但 fingerprint_code 仍是旧值 → 3，不写入"""
+        m = self._rewrite_manifest(lambda m: m.update(summary="改过的摘要"))
+        self.assertNotEqual(m["manifest_sha256"][:8], m["fingerprint_code"])
+        self.assertRefused(self.sign(self.pid, "确认"), EXIT_FINGERPRINT, None)
+
+    def test_fingerprint_code_altered_only(self):
+        """〔裁定 N2〕只改 fingerprint_code（manifest_sha256 与内容自洽）→ 3，不写入"""
+        self._rewrite_manifest(lambda m: m.update(fingerprint_code="deadbeef"), reseal_sha=False)
+        self.assertRefused(self.sign(self.pid, "确认"), EXIT_FINGERPRINT, None)
+
+    def test_reject_whitespace_reason(self):
+        """〔裁定 N4／Q8〕退回理由只有空白（半角空格、全角空格）→ 1，不写入"""
+        for reason in ("   ", "\u3000"):
+            with self.subTest(reason=repr(reason)):
+                self.assertRefused(self.sign(self.pid, "退回", reason=reason), EXIT_USAGE, None)
+
+    def test_echo_reject(self):
+        """〔裁定 N4／Q17〕退回时屏幕回显至少含包编号、"退回"与指纹码"""
+        res = self.sign(self.pid, "退回", reason="第三节不全", json_out=False)
+        self.assertExit(res, EXIT_OK)
+        self.assertIn(self.pid, res.stdout, res.describe())
+        self.assertIn(self.m["fingerprint_code"], res.stdout, res.describe())
+        self.assertIn("退回", res.stdout, res.describe())
 
 
 if __name__ == "__main__":
