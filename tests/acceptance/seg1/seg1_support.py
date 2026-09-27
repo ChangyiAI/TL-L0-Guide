@@ -487,3 +487,55 @@ class Seg1TestCase(unittest.TestCase):
         rec = self.forged_record(package_id, fingerprint_code, decision)
         rec["manifest_sha256"] = manifest_sha256
         return rec
+
+    # ------------------------------------------------ 〔v0.5〕接口规格第 11 节回归用例的公共部件（只增不改）
+
+    def rewrite_sig_records(self, records):
+        """〔v0.5〕用给定记录重写整份签字记录，按规格重新串好 prev_sha256（模拟"整份重写、链条自洽"的篡改）。"""
+        out, prev = [], ZERO64
+        for rec in records:
+            r = dict(rec)
+            r["prev_sha256"] = prev
+            line = json.dumps(r, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            out.append(line)
+            prev = sha256_hex(line)
+        self.sig_file.parent.mkdir(parents=True, exist_ok=True)
+        self.sig_file.write_bytes(b"".join(line + b"\n" for line in out))
+
+    def symlink_or_skip(self, target, link, target_is_directory=False):
+        """〔v0.5〕建符号链接；本机没有建链接的特权（如普通 Windows 账户，WinError 1314）时跳过本用例并写明原因。"""
+        Path(link).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.symlink(str(target), str(link), target_is_directory=target_is_directory)
+        except (OSError, NotImplementedError) as e:
+            self.skipTest(f"本机无法建立符号链接（需要特权）：{e}")
+
+    def make_unreadable_or_skip(self, path):
+        """〔v0.5〕让另一个进程读不了 path：Windows 上由本进程对整个文件加字节锁（模拟被独占打开），
+        其他系统上去掉全部权限。随后用子进程实读一次确认；读得到（例如以 root 运行）就跳过本用例并写明原因。
+        返回一个恢复函数（本用例结束时也会自动恢复）。"""
+        path = Path(path)
+        size = max(path.stat().st_size, 1)
+        if os.name == "nt":
+            import msvcrt
+            fh = open(path, "r+b")
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, size)
+
+            def restore():
+                if not fh.closed:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, size)
+                    fh.close()
+        else:
+            mode = stat.S_IMODE(path.stat().st_mode)
+            os.chmod(path, 0)
+
+            def restore():
+                os.chmod(path, mode)
+        self.addCleanup(restore)
+        probe = subprocess.run([sys.executable, "-c", "import sys; open(sys.argv[1], 'rb').read()", str(path)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if probe.returncode == 0:
+            restore()
+            self.skipTest("无法构造“签字文件读不了”：本机当前账户仍能读取该文件（例如以 root 运行）")
+        return restore
